@@ -59,6 +59,41 @@ $authResponse = Invoke-RestMethod -Method Post -Uri $oAuthUri -Body $authBody -E
 $token = $authResponse | Select-Object -ExpandProperty access_token
 return $token
 }
+#############################################################################
+## Send Mail
+#############################################################################
+
+function Send-Email{
+    [cmdletbinding()]
+        Param(
+            [Parameter(Mandatory = $true, Position = 0)]
+            [string]$token,
+            [parameter(Mandatory = $true, Position = 1)]
+            [string]$advHTableName,
+            [Parameter(Mandatory = $true, Position = 2)]
+            [string]$lastRead
+        )
+$url = "https://graph.microsoft.com/v1.0/users/$From/sendMail"
+
+$body = @{ "message" : { "subject": "$Subject", "body" : { "contentType": "html", "content": "$bodyContent" }, "toRecipients": [ { "emailAddress" : { "address" : "$To" } } ] } } "
+
+$headers = @{
+    'Content-Type' = 'application/json'
+    'Accept' = 'application/json'
+    'Authorization' = "Bearer $token"
+}
+
+$Body = $Body | ConvertTo-Json
+
+try{
+    $response = Invoke-WebRequest -Method Post -Body $body -Uri $url -Headers $headers -ErrorAction Stop
+    $data =  ($response | ConvertFrom-Json).results | ConvertTo-Json -Depth 99
+    return $data
+} catch {
+    "Error pulling Adv Data, could be no vaild results: {0}" -f $data.statuscode | Write-Host 
+    return $null
+}
+}
 
 # Delete the temporary folder
 Remove-Item -Recurse -Force $TempFolder

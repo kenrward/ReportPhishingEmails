@@ -4,6 +4,7 @@ obj
 appsettings.json
 local.settings.json
 *.zip
+.vscode
 
 # Azurite artifacts
 __blobstorage__
