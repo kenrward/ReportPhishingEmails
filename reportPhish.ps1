@@ -8,11 +8,12 @@ $User = $env:username
 $Password = ConvertTo-SecureString $env:passwd -AsPlainText -Force
 $Credential = New-Object System.Management.Automation.PSCredential($User, $Password)
 # Connect to Exchange Online
-Connect-ExchangeOnline -Credential $Credential
+
+# Connect-ExchangeOnline -Credential $Credential
 
 # Set the email address to which the forwarded emails will be sent
-$To = "kenrward@gmail.com"
-$From = "test.eop@tirchfamily.com"
+$To = "ken.ward@microsoft.com"
+$From = "admin@m365x59205144.onmicrosoft.com"
 
 # Set the subject and body of the forwarded email
 $Subject = "Phishing Emails"
@@ -25,14 +26,29 @@ $i = 0
 
 # Search for the phishing emails in the quarantine and export them to the temporary folder
 # https://learn.microsoft.com/en-us/powershell/module/exchange/export-quarantinemessage?view=exchange-ps
-$SearchResults = Get-QuarantineMessage -QuarantineTypes HighConfPhish
+$SearchResults = Get-QuarantineMessage -Type "HighConfPhish"
 foreach ($SearchResult in $SearchResults) {
-    $e = Export-QuarantineMessage -Identity $SearchResult.Identity
-    $e.BodyEncoding
-    $filepath = "{0}\{1}.eml" -f $TempFolder,$i
-    $e | Select-Object -ExpandProperty Eml | Out-File $filepath -Encoding ascii
-    $i++
+    try{
+        $e = Export-QuarantineMessage -Identity $SearchResult.Identity -ErrorAction Stop
+        $filepath = "{0}\{1}.eml" -f $TempFolder,$i
+        $attachements += @(
+            [pscustomobject]@{"@odata.type"="#microsoft.graph.fileAttachment";
+            "name"= "$filepath";
+            "contentType"= "text/plain";
+            "contentBytes"= "$e.eml"}
+        )
+        #[System.Text.Encoding]::Ascii.GetString([System.Convert]::FromBase64String($e.eml)) | Out-File $filepath -Encoding ascii
+        Write-Host "Successfully exported email id:" $SearchResult.Identity
+        $i++
+    } catch {
+        Write-Host "Error exporting email id:" $SearchResult.Identity 
+        $i++
+    }
+   
 }
+
+# Delete the temporary folder
+Remove-Item -Recurse -Force $TempFolder
 
 # Create the forwarded email with the exported emails as attachments
 # Must use the graph API to send the email
@@ -42,19 +58,9 @@ foreach ($SearchResult in $SearchResults) {
 #############################################################################
 ## Logon to API to grap token
 #############################################################################
-function Get-AuthToken{
-    [cmdletbinding()]
-        Param(
-            [Parameter(Mandatory = $true, Position = 0)]
-            [string]$clientId,
-            [parameter(Mandatory = $true, Position = 1)]
-            [string]$appSecret,
-            [Parameter(Mandatory = $true, Position = 2)]
-            [string]$tenantId
-        )
 
 $resourceAppIdUri = 'https://graph.microsoft.com/.default'
-$oAuthUri = "https://login.microsoftonline.com/$tenantId/oauth2/token"
+$oAuthUri = "https://login.microsoftonline.com/$tenantId/oauth2/v2.0/token"
 
 $authBody = [Ordered] @{
   scope = $resourceAppIdUri
@@ -64,25 +70,54 @@ $authBody = [Ordered] @{
 }
 $authResponse = Invoke-RestMethod -Method Post -Uri $oAuthUri -Body $authBody -ErrorAction Stop
 $token = $authResponse | Select-Object -ExpandProperty access_token
-return $token
-}
+
 #############################################################################
 ## Send Mail
 #############################################################################
 
-function Send-Email{
-    [cmdletbinding()]
-        Param(
-            [Parameter(Mandatory = $true, Position = 0)]
-            [string]$token,
-            [parameter(Mandatory = $true, Position = 1)]
-            [string]$advHTableName,
-            [Parameter(Mandatory = $true, Position = 2)]
-            [string]$lastRead
-        )
 $url = "https://graph.microsoft.com/v1.0/users/$From/sendMail"
 
-$body = @{ "message" : { "subject": "$Subject", "body" : { "contentType": "html", "content": "$bodyContent" }, "toRecipients": [ { "emailAddress" : { "address" : "$To" } } ] } } "
+$Body = @{
+    "message" = @{
+        "subject" = $Subject
+        "body" = @{
+            "contentType" = "Text"
+            "content" = $Body
+        }
+        "toRecipients" = @(
+            @{
+                "emailAddress" = @{
+                    "address" = $To
+                }
+            }
+        )
+        "attachments" = "" #$attachments
+    }
+} | ConvertTo-Json -Depth 99
+
+$BodyJsonsend = @"
+                    {
+                        "message": {
+                          "subject": "Hello World from Microsoft Graph API",
+                          "body": {
+                            "contentType": "HTML",
+                            "content": "This Mail is sent via Microsoft <br>
+                            GRAPH <br>
+                            API<br>
+                            
+                            "
+                          },
+                          "toRecipients": [
+                            {
+                              "emailAddress": {
+                                "address": "$To"
+                              }
+                            }
+                          ]
+                        },
+                        "saveToSentItems": "false"
+                      }
+"@
 
 $headers = @{
     'Content-Type' = 'application/json'
@@ -90,17 +125,13 @@ $headers = @{
     'Authorization' = "Bearer $token"
 }
 
-$Body = $Body | ConvertTo-Json
-
 try{
-    $response = Invoke-WebRequest -Method Post -Body $body -Uri $url -Headers $headers -ErrorAction Stop
+    $response = Invoke-WebRequest -Method Post -Body $BodyJsonsend -Uri $url -Headers $headers -ErrorAction Stop
     $data =  ($response | ConvertFrom-Json).results | ConvertTo-Json -Depth 99
-    return $data
+    return 1
 } catch {
-    "Error pulling Adv Data, could be no vaild results: {0}" -f $data.statuscode | Write-Host 
+    "Error sending email: {0}" -f $data.statuscode | Write-Host 
     return $null
 }
-}
 
-# Delete the temporary folder
-Remove-Item -Recurse -Force $TempFolder
+
