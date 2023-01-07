@@ -28,6 +28,37 @@ foreach ($SearchResult in $SearchResults) {
 # Create the forwarded email with the exported emails as attachments
 # Must use the graph API to send the email
 # https://practical365.com/upgrade-powershell-scripts-sendmailmessage/
+$tenantId = $env:tenantId
+$clientId = $env:clientId
+$appSecret = $env:clientSecret
+
+#############################################################################
+## Logon to API to grap token
+#############################################################################
+function Get-AuthToken{
+    [cmdletbinding()]
+        Param(
+            [Parameter(Mandatory = $true, Position = 0)]
+            [string]$clientId,
+            [parameter(Mandatory = $true, Position = 1)]
+            [string]$appSecret,
+            [Parameter(Mandatory = $true, Position = 2)]
+            [string]$tenantId
+        )
+
+$resourceAppIdUri = 'https://graph.microsoft.com/.default'
+$oAuthUri = "https://login.microsoftonline.com/$tenantId/oauth2/token"
+
+$authBody = [Ordered] @{
+  scope = $resourceAppIdUri
+  client_id = $clientId
+  client_secret = $appSecret
+  grant_type = 'client_credentials'
+}
+$authResponse = Invoke-RestMethod -Method Post -Uri $oAuthUri -Body $authBody -ErrorAction Stop
+$token = $authResponse | Select-Object -ExpandProperty access_token
+return $token
+}
 
 # Delete the temporary folder
 Remove-Item -Recurse -Force $TempFolder
