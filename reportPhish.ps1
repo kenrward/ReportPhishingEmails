@@ -1,5 +1,14 @@
+$tenantId = $env:tenantId
+$clientId = $env:clientId
+$appSecret = $env:clientSecret
+
 # Connect to Exchange Online
-# Connect-ExchangeOnline 
+# Set the credentials for connecting to Exchange Online
+$User = $env:username
+$Password = ConvertTo-SecureString $env:passwd -AsPlainText -Force
+$Credential = New-Object System.Management.Automation.PSCredential($User, $Password)
+# Connect to Exchange Online
+Connect-ExchangeOnline -Credential $Credential
 
 # Set the email address to which the forwarded emails will be sent
 $To = "kenrward@gmail.com"
@@ -28,9 +37,7 @@ foreach ($SearchResult in $SearchResults) {
 # Create the forwarded email with the exported emails as attachments
 # Must use the graph API to send the email
 # https://practical365.com/upgrade-powershell-scripts-sendmailmessage/
-$tenantId = $env:tenantId
-$clientId = $env:clientId
-$appSecret = $env:clientSecret
+
 
 #############################################################################
 ## Logon to API to grap token
