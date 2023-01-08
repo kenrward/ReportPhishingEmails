@@ -22,11 +22,12 @@ $Body = "The attached file contains the phishing emails that were found in the q
 # Create a temporary folder to store the exported emails
 # $TempFolder = "$env:Temp\PhishingEmails"
 # New-Item -ItemType Directory -Path $TempFolder | Out-Null
+$attachements = $null
 
 
 # Search for the phishing emails in the quarantine and export them to the temporary folder
 # https://learn.microsoft.com/en-us/powershell/module/exchange/export-quarantinemessage?view=exchange-ps
-$SearchResults = Get-QuarantineMessage -Type "HighConfPhish"
+$SearchResults = Get-QuarantineMessage -Type "HighConfPhish" -PageSize 1
 foreach ($SearchResult in $SearchResults) {
     try{
         $e = Export-QuarantineMessage -Identity $SearchResult.Identity -ErrorAction Stop
@@ -36,7 +37,7 @@ foreach ($SearchResult in $SearchResults) {
             [pscustomobject]@{"@odata.type"="#microsoft.graph.fileAttachment";
             "name"= "$cleanId";
             "contentType"= "text/plain";
-            "contentBytes"= "$e.eml"}
+            "contentBytes"= $e.eml}
         )
         # Write file to disk
         #[System.Text.Encoding]::Ascii.GetString([System.Convert]::FromBase64String($e.eml)) | Out-File $filepath -Encoding ascii
@@ -93,9 +94,7 @@ $BodyJsonsend = @"
                             }
                           ],
                           "attachments": [
-                            {
                               $attachements
-                            }
                           ]
                         },
                         "saveToSentItems": "true"
@@ -112,7 +111,7 @@ $BodyJsonsend = @"
 $url = $env:requestURL
 
 try{
-    $response = Invoke-WebRequest -Method Post -Body $BodyJsonsend -Uri $url -ErrorAction Stop
+    $response = Invoke-WebRequest -Method Post -Body $attachements -Uri $url -ErrorAction Stop
     "Successfully sent email: {0}" -f $response.StatusDescription | Write-Host -ForegroundColor Blue
 } catch {
     "Error sending email: {0}" -f $response.StatusDescription | Write-Host -ForegroundColor Red
