@@ -22,27 +22,31 @@ New-Item -ItemType Directory -Path $TempFolder | Out-Null
 
 # Search for the phishing emails in the quarantine and export them to the temporary folder
 # https://learn.microsoft.com/en-us/powershell/module/exchange/export-quarantinemessage?view=exchange-ps
-# $SearchResults = Get-QuarantineMessage -Type "HighConfPhish" -PageSize 1
 
-$SearchResults = Get-QuarantineMessage -Type "Phish" 
-foreach ($SearchResult in $SearchResults) {
-    try{
-        $e = Export-QuarantineMessage -Identity $SearchResult.Identity -ErrorAction Continue
-        $cleanId = $SearchResult.Identity.Replace("\","_")
-        
-        # Write file to disk
-        $filepath = "{0}\{1}.eml" -f $TempFolder,$cleanId 
-        [System.Text.Encoding]::Ascii.GetString([System.Convert]::FromBase64String($e.eml)) | Out-File $filepath -Encoding ascii
-        
-        # Send file to Azure Storage Blob
-        Set-AzStorageBlobContent -Blob $cleanId -File $filepath -Context $ctx -Container $env:ContainerName 
+$emailTypes = @("HighConfPhish","Phish")
 
-        "Successfully exported email: {0}" -f $SearchResult.Identity | Write-Host -ForegroundColor Blue
-    } catch {
-        "Error exporting email: {0}" -f $SearchResult.Identity | Write-Host -ForegroundColor Red
+foreach($emailType in $emailTypes)
+{
+    $SearchResults = Get-QuarantineMessage -Type $emailType
+    foreach ($SearchResult in $SearchResults) {
+        try{
+            $e = Export-QuarantineMessage -Identity $SearchResult.Identity -ErrorAction Continue
+            $cleanId = $SearchResult.Identity.Replace("\","_")
+            
+            # Write file to disk
+            $filepath = "{0}\{1}.eml" -f $TempFolder,$cleanId 
+            [System.Text.Encoding]::Ascii.GetString([System.Convert]::FromBase64String($e.eml)) | Out-File $filepath -Encoding ascii
+            
+            # Send file to Azure Storage Blob
+            $w = Set-AzStorageBlobContent -Blob $cleanId -File $filepath -Context $ctx -Container $env:ContainerName -Force
+            "Successfully exported email {0} ({1}) bytes" -f $w.name,$w.Length | Write-Host -ForegroundColor Blue
+        } catch {
+            "Error exporting email: {0}" -f $SearchResult.Identity | Write-Host -ForegroundColor Red
+        }
+    
     }
-   
 }
+
 
 # Delete the temporary folder
 Remove-Item -Recurse -Force $TempFolder
