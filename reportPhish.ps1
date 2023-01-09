@@ -1,3 +1,10 @@
+# To run, you will need to set a couple environment variables
+# $env:username = EXO username
+# $env:passwd = EXO password
+# $env:AzureWebJobsStorage = This is the connection string for the Azure Storage Account where the emails will be stored and where the Azure Storage Table will be created
+# $env:ContainerName = This is the Azure Blob container where the .eml files will be stored
+
+
 # Connect to Exchange Online
 # Set the credentials for connecting to Exchange Online
 $Password = ConvertTo-SecureString $env:passwd -AsPlainText -Force
