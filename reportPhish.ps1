@@ -14,13 +14,15 @@ $Credential = New-Object System.Management.Automation.PSCredential($User, $Passw
 # Connect-ExchangeOnline -Credential $Credential
 
 # Connect to Azure
-Login-AzAccount 
+# Login-AzAccount 
 
 # Get the Azure Storage Account Context
-$ctx = Get-AzStorageAccount -ResourceGroupName $strRG -Name $strAccountName | Get-AzStorageAccountContext
+$ctx = New-AzStorageContext -ConnectionString $env:AzureWebJobsStorage
 
 # Search for the phishing emails in the quarantine and export them to the temporary folder
 # https://learn.microsoft.com/en-us/powershell/module/exchange/export-quarantinemessage?view=exchange-ps
+# $SearchResults = Get-QuarantineMessage -Type "HighConfPhish" -PageSize 1
+
 $SearchResults = Get-QuarantineMessage -Type "HighConfPhish" -PageSize 1
 foreach ($SearchResult in $SearchResults) {
     try{
@@ -32,7 +34,7 @@ foreach ($SearchResult in $SearchResults) {
         #[System.Text.Encoding]::Ascii.GetString([System.Convert]::FromBase64String($e.eml)) | Out-File $filepath -Encoding ascii
         
         # Send file to Azure Storage Blob
-        [System.Text.Encoding]::Ascii.GetString([System.Convert]::FromBase64String($e.eml)) | Set-AzStorageBlobContent -Blob $cleanId -Container $container -Context $ctx
+        #[System.Text.Encoding]::Ascii.GetString([System.Convert]::FromBase64String($e.eml)) | Set-AzStorageBlobContent -Blob $cleanId -Container $container -Context $ctx
 
         "Successfully exported email: {0}" -f $SearchResult.Identity | Write-Host -ForegroundColor Blue
     } catch {
