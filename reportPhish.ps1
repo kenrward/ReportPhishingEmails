@@ -1,9 +1,3 @@
-#$tenantId = $env:tenantId
-#$clientId = $env:clientId
-#$appSecret = $env:clientSecret
-#$strRG = $env:strRG
-#$strAccountName = $env:strAccountName
-
 # Connect to Exchange Online
 # Set the credentials for connecting to Exchange Online
 $Password = ConvertTo-SecureString $env:passwd -AsPlainText -Force
@@ -12,9 +6,13 @@ $Credential = New-Object System.Management.Automation.PSCredential($env:username
 # Connect to Exchange Online
 Connect-ExchangeOnline -Credential $Credential -UseRPSSession
 
-
 # Get the Azure Storage Account Context
 $ctx = New-AzStorageContext -ConnectionString $env:AzureWebJobsStorage
+$tableName = "PhishingEmails"
+$tableRow = @{}
+
+# Get Adv Hunting Table Names from Azure Storage Table Service
+$cloudTable = (Get-AzStorageTable -Name $tableName -Context $ctx).CloudTable
 
 # Create a temporary folder to store the exported emails
 $TempFolder = "$env:Temp\PhishingEmails"
@@ -29,24 +27,41 @@ foreach($emailType in $emailTypes)
 {
     $SearchResults = Get-QuarantineMessage -Type $emailType
     foreach ($SearchResult in $SearchResults) {
-        try{
-            $e = Export-QuarantineMessage -Identity $SearchResult.Identity -ErrorAction Continue
-            $cleanId = $SearchResult.Identity.Replace("\","_")
-            
-            # Write file to disk
-            $filepath = "{0}\{1}.eml" -f $TempFolder,$cleanId 
-            [System.Text.Encoding]::Ascii.GetString([System.Convert]::FromBase64String($e.eml)) | Out-File $filepath -Encoding ascii
-            
-            # Send file to Azure Storage Blob
-            $w = Set-AzStorageBlobContent -Blob $cleanId -File $filepath -Context $ctx -Container $env:ContainerName -Force
-            "Successfully exported email {0} ({1}) bytes" -f $w.name,$w.Length | Write-Host -ForegroundColor Blue
-        } catch {
-            "Error exporting email: {0}" -f $SearchResult.Identity | Write-Host -ForegroundColor Red
+        # see if email already exists in the table
+        $partitionKey1 = $emailType
+        $cleanId = $SearchResult.Identity.Replace("\","_")
+        $tableRow = Get-AzTableRow -table $cloudTable -partitionKey $partitionKey1 -rowKey $cleanId
+        if($null -ne $tableRow)
+        {
+            "Email already exists in the table: {0}" -f $SearchResult.Identity | Write-Host -ForegroundColor Yellow
+            continue
+        } else {
+            "Email does not exist in the table: {0}" -f $SearchResult.Identity | Write-Host -ForegroundColor Green
+
+            try{
+                $e = Export-QuarantineMessage -Identity $SearchResult.Identity -ErrorAction Continue
+                "Successfully exported email {0}" -f $SearchResult.Identity  | Write-Host -ForegroundColor Blue
+            } catch {
+                "Error exporting email {0}" -f $SearchResult.Identity | Write-Host -ForegroundColor Red
+                break
+            }
+                
+        # Write file to disk
+        $filepath = "{0}\{1}.eml" -f $TempFolder,$cleanId 
+        [System.Text.Encoding]::Ascii.GetString([System.Convert]::FromBase64String($e.eml)) | Out-File $filepath -Encoding ascii
+
+        # Send file to Azure Storage Blob
+        $w = Set-AzStorageBlobContent -Blob $cleanId -File $filepath -Context $ctx -Container $env:ContainerName -Force
+
+        # Add the email to the Azure Storage Table Index
+        $tableAdd = Add-AzTableRow `
+            -table $cloudTable `
+            -partitionKey $partitionKey1 `
+            -rowKey ($cleanId) -property @{"type"=$emailType;"length"=$w.Length}
         }
-    
+
     }
 }
-
 
 # Delete the temporary folder
 Remove-Item -Recurse -Force $TempFolder
