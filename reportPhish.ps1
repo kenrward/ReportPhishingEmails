@@ -18,21 +18,23 @@ $ctx = New-AzStorageContext -ConnectionString $env:AzureWebJobsStorage
 $tableName = "PhishingEmails"
 $tableRow = @{}
 
-# Get Adv Hunting Table Names from Azure Storage Table Service
+# Get the Azure Storage Table
 $cloudTable = (Get-AzStorageTable -Name $tableName -Context $ctx).CloudTable
 
 # Create a temporary folder to store the exported emails
 $TempFolder = "$env:Temp\PhishingEmails"
 New-Item -ItemType Directory -Path $TempFolder | Out-Null
 
-# Search for the phishing emails in the quarantine and export them to the temporary folder
-# https://learn.microsoft.com/en-us/powershell/module/exchange/export-quarantinemessage?view=exchange-ps
-
+# Search for the phishing emails in the quarantine and export them to Azure Storage
 $emailTypes = @("HighConfPhish","Phish")
+
+# Get some stats
+$TotalEmails = 0
+$TotalLength = 0
 
 foreach($emailType in $emailTypes)
 {
-    $SearchResults = Get-QuarantineMessage -Type $emailType
+    $SearchResults = Get-QuarantineMessage -Type $emailType -PageSize 2
     foreach ($SearchResult in $SearchResults) {
         # see if email already exists in the table
         $partitionKey1 = $emailType
@@ -67,8 +69,114 @@ foreach($emailType in $emailTypes)
             -rowKey ($cleanId) -property @{"type"=$emailType;"length"=$w.Length}
         }
 
+        $attachements += @(
+            [pscustomobject]@{"@odata.type"="#microsoft.graph.fileAttachment";
+            "name"= "$filepath";
+            "contentType"= "text/plain";
+            "contentBytes"= "$e.eml"}
+        )
+        
+        $TotalEmails++
+        $TotalLength += $w.Length
+
     }
 }
 
+
+
+$TotalEmails | Write-Host -ForegroundColor Green
+$TotalLength | Write-Host -ForegroundColor Green
+
+
+#############################################################################
+## Logon to API to grap token
+#############################################################################
+
+$resourceAppIdUri = 'https://graph.microsoft.com/.default'
+$oAuthUri = "https://login.microsoftonline.com/$env:tenantId/oauth2/v2.0/token"
+
+$authBody = [Ordered] @{
+  scope = $resourceAppIdUri
+  client_id = $env:clientId
+  client_secret = $env:clientSecret
+  grant_type = 'client_credentials'
+}
+$authResponse = Invoke-RestMethod -Method Post -Uri $oAuthUri -Body $authBody -ErrorAction Stop
+$token = $authResponse | Select-Object -ExpandProperty access_token
+
+#############################################################################
+## Send Mail
+#############################################################################
+# Set the email address to which the forwarded emails will be sent
+$To = "admin@m365x59205144.onmicrosoft.com"
+$From = "btirch@tirchfamily.com"
+
+# Set the subject and body of the forwarded email
+$Subject = "Phishing Emails"
+$Body = "The attached file contains the phishing emails that were found in the quarantine."
+
+$url = "https://graph.microsoft.com/v1.0/users/$From/sendMail"
+
+$Body = @{
+    "message" = @{
+        "subject" = $Subject
+        "body" = @{
+            "contentType" = "Text"
+            "content" = $Body
+        }
+        "toRecipients" = @(
+            @{
+                "emailAddress" = @{
+                    "address" = $To
+                }
+            }
+        )
+        "attachments" = "" #$attachments
+    }
+} | ConvertTo-Json -Depth 99
+
+$BodyJsonsend = @"
+                    {
+                        "message": {
+                          "subject": "Hello World from Microsoft Graph API",
+                          "body": {
+                            "contentType": "HTML",
+                            "content": "This Mail is sent via Microsoft <br>
+                            GRAPH <br>
+                            API<br>
+                            
+                            "
+                          },
+                          "toRecipients": [
+                            {
+                              "emailAddress": {
+                                "address": "$To"
+                              }
+                            }
+                          ]
+                        },
+                        "saveToSentItems": "false"
+                      }
+"@
+
+$headers = @{
+    'Content-Type' = 'application/json'
+    'Accept' = 'application/json'
+    'Authorization' = "Bearer $token"
+}
+
+try{
+    $response = Invoke-WebRequest -Method Post -Body $BodyJsonsend -Uri $url -Headers $headers -ErrorAction Stop
+    $data =  ($response | ConvertFrom-Json).results | ConvertTo-Json -Depth 99
+    return 1
+} catch {
+    "Error sending email: {0}" -f $data.statuscode | Write-Host 
+    return $null
+}
+
+
 # Delete the temporary folder
 Remove-Item -Recurse -Force $TempFolder
+# Clean up the Azure Storage Account and Table
+# Get-AzStorageBlob -Container $env:ContainerName -Context $ctx | Remove-AzStorageBlob
+# Get-AzTableRow -table $cloudTable | Remove-AzTableRow -table $cloudTable
