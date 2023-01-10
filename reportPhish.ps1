@@ -57,6 +57,7 @@ foreach($emailType in $emailTypes)
                 
         # Write file to disk
         $filepath = "{0}\{1}.eml" -f $TempFolder,$cleanId 
+        $filename = "{0}.eml" -f $cleanId
         [System.Text.Encoding]::Ascii.GetString([System.Convert]::FromBase64String($e.eml)) | Out-File $filepath -Encoding ascii
 
         # Send file to Azure Storage Blob
@@ -71,11 +72,11 @@ foreach($emailType in $emailTypes)
 
         $attachements += @(
             [pscustomobject]@{"@odata.type"="#microsoft.graph.fileAttachment";
-            "name"= "$filepath";
+            "name"= "$filename";
             "contentType"= "text/plain";
-            "contentBytes"= "$e.eml"}
+            "contentBytes"= $e.eml}
         )
-        
+
         $TotalEmails++
         $TotalLength += $w.Length
 
@@ -117,23 +118,7 @@ $Body = "The attached file contains the phishing emails that were found in the q
 
 $url = "https://graph.microsoft.com/v1.0/users/$From/sendMail"
 
-$Body = @{
-    "message" = @{
-        "subject" = $Subject
-        "body" = @{
-            "contentType" = "Text"
-            "content" = $Body
-        }
-        "toRecipients" = @(
-            @{
-                "emailAddress" = @{
-                    "address" = $To
-                }
-            }
-        )
-        "attachments" = "" #$attachments
-    }
-} | ConvertTo-Json -Depth 99
+$attachements = $attachements | ConvertTo-Json 
 
 $BodyJsonsend = @"
                     {
@@ -155,6 +140,9 @@ $BodyJsonsend = @"
                             }
                           ]
                         },
+                        "attachments": 
+                            $attachements
+                        ,
                         "saveToSentItems": "false"
                       }
 "@
@@ -179,4 +167,4 @@ try{
 Remove-Item -Recurse -Force $TempFolder
 # Clean up the Azure Storage Account and Table
 # Get-AzStorageBlob -Container $env:ContainerName -Context $ctx | Remove-AzStorageBlob
-# Get-AzTableRow -table $cloudTable | Remove-AzTableRow -table $cloudTable
+# $t = Get-AzTableRow -table $cloudTable | Remove-AzTableRow -table $cloudTable
